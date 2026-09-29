@@ -1,0 +1,95 @@
+\documentclass{report}
+
+\begin{document}
+\title{Labwork 2: Get to know your GPU}
+\author{Philippe Olivier Schriqui-Duque \\ ID: 2640042}
+\date{}
+\maketitle
+
+\section*{Introduction}
+
+The goal of this labwork is to get to know my GPU with Numba: its name, the number of
+multiprocessors, the number of cores and the memory size.
+Before writing CUDA programs it is important to know the hardware we use, because the number
+of cores and the memory limit how much work we can give to the GPU.
+I work on my laptop with Kali Linux in WSL2, which has an NVIDIA GPU, and I use Python with the
+\texttt{numba} library.
+
+\section*{Code}
+
+I use the \texttt{cuda} module of Numba to get the information of my GPU.
+First I call \texttt{cuda.detect()} to list the GPUs that Numba can see. I only have one,
+so I select it with its id 0 and get the device object. This object has the name and the id
+of the GPU:
+
+\begin{verbatim}
+from numba import cuda
+
+cuda.detect()
+cuda.select_device(0)
+device = cuda.get_current_device()
+print(f"Device name: {device.name}")
+print(f"Device id: {device.id}")
+\end{verbatim}
+
+A GPU is made of several streaming multiprocessors (SM), and each SM has a group of CUDA cores.
+The number of SM is an attribute of the device:
+
+\begin{verbatim}
+MPC = device.MULTIPROCESSOR_COUNT
+cores_per_sm = 128
+total_cores = MPC * cores_per_sm
+\end{verbatim}
+
+Numba does not give the number of cores, so I multiply the number of SM by the cores per SM.
+I put 128 directly because I know my GPU: it is an RTX 3070 Laptop (compute capability 8.6),
+which has 128 cores per SM. On another GPU this number could be different.
+
+\[
+\mbox{cores} = \mbox{SM} \times \mbox{cores per SM} = 40 \times 128 = 5120
+\]
+
+The memory size is not an attribute of the device. I get it from the current CUDA context,
+which gives the free and the total memory in bytes. I divide by $1024^3$ to have it in GB:
+
+\begin{verbatim}
+free, total = cuda.current_context().get_memory_info()
+print(f"Memory size: {total / 1024**3:.2f} GB")
+\end{verbatim}
+
+\[
+\mbox{memory} = \frac{8\,589\,410\,304 \mbox{ bytes}}{1024^3} \approx 8 \mbox{ GB}
+\]
+
+I also printed some extra information with other attributes of the device:
+\texttt{CLOCK\_RATE}, \texttt{MAX\_THREADS\_PER\_BLOCK}, \texttt{WARP\_SIZE} and
+\texttt{MEMORY\_CLOCK\_RATE}. The clock rates are given in kHz, so I divide them by 1000 to get MHz.
+
+\section*{Output}
+
+This is the result when I run \texttt{python labwork2.py}:
+
+\begin{verbatim}
+Device name: NVIDIA GeForce RTX 3070 Laptop GPU
+Device id: 0
+Multiprocessor count: 40
+Total cores: 5120
+Memory size: 8.00 GB
+Clock rate: 1290.00 MHz
+Max threads per block: 1024
+Warp size: 32
+Memory clock: 6001.00 MHz
+\end{verbatim}
+
+The results are the same as the official specifications of the RTX 3070 Laptop.
+The max threads per block (1024) and the warp size (32) will be useful later, when we choose
+the block size of our kernels.
+
+\section*{Conclusion}
+
+In this labwork I learned how to use Numba to get information about my GPU.
+My GPU is an RTX 3070 Laptop with 40 SM, 5120 cores and 8 GB of memory.
+It has a lot more cores than my CPU (16 threads), so it will be useful for the next labworks
+where we run the same simple operation on many pixels at the same time.
+
+\end{document}
