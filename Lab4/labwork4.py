@@ -61,8 +61,8 @@ blockSizes = [
     (32, 32)    # 1024 threads (max GPU)
 ]
 
-moyennes = []
-ecarts = []
+means = []
+stds = []
 labels = []
 
 for bs in blockSizes:
@@ -76,15 +76,15 @@ for bs in blockSizes:
     mean_sp = np.mean(sp_list)
     std_sp = np.std(sp_list)
 
-    moyennes.append(mean_sp)
-    ecarts.append(std_sp)
+    means.append(mean_sp)
+    stds.append(std_sp)
 
     label = f"{bs[0]}x{bs[1]}"
     labels.append(label)
     print(f"block size {label} : speedup = {mean_sp:.2f}x ± {std_sp:.2f}x")
 
 plt.figure(figsize=(9, 5))
-plt.errorbar(labels, moyennes, yerr=ecarts, marker="o", capsize=4, ecolor="red", color="blue")
+plt.errorbar(labels, means, yerr=stds, marker="o", capsize=4, ecolor="red", color="blue")
 plt.xlabel("2D Block Size (bx x by)")
 plt.ylabel("Speedup (x)")
 plt.title("2D Block Size vs Speedup (Mean ± Std Dev over 100 runs)")
