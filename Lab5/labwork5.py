@@ -10,19 +10,18 @@ h, w, _ = img.shape
 print("image size:", w, "x", h)
 
 
-# Gaussian filter 7x7 (formula from the slides, sigma = 1)
+# Gaussian filter
 sigma = 1.0
 gaussian = np.zeros((7, 7), dtype=np.float32)
 for y in range(7):
     for x in range(7):
         gaussian[y, x] = 1 / (2 * np.pi * sigma**2) * np.exp(-((x - 3)**2 + (y - 3)**2) / (2 * sigma**2))
-gaussian = gaussian / gaussian.sum()  # sum = 1
+gaussian = gaussian / gaussian.sum()
 print(np.round(gaussian * 1000).astype(int))
 
 
 
-# CPU blur (only on a 256x256 crop, the full image is too slow)
-# the 3 pixels on the border are not blurred, the 7x7 window does not fit there
+# CPU (on a crop)
 def cpu_blur(img):
     h, w, _ = img.shape
     out = img.copy()
@@ -47,7 +46,7 @@ plt.imsave("crop_original.jpg", crop)
 plt.imsave("crop_blur_cpu.jpg", cpu_result)
 
 
-# GPU blur, filter in global memory
+# GPU without shared memory
 @cuda.jit
 def blur(src, dst, filter):
     x = cuda.threadIdx.x + cuda.blockIdx.x * cuda.blockDim.x
@@ -62,13 +61,13 @@ def blur(src, dst, filter):
         dst[y, x, c] = s
 
 
-# GPU blur, filter copied in shared memory
+# GPU with shared memory
 @cuda.jit
 def blur_shared(src, dst, filter):
     tile = cuda.shared.array((7, 7), numba.float32)
     if cuda.threadIdx.x < 7 and cuda.threadIdx.y < 7:
         tile[cuda.threadIdx.y, cuda.threadIdx.x] = filter[cuda.threadIdx.y, cuda.threadIdx.x]
-    cuda.syncthreads()  # wait for the whole block
+    cuda.syncthreads()
 
     x = cuda.threadIdx.x + cuda.blockIdx.x * cuda.blockDim.x
     y = cuda.threadIdx.y + cuda.blockIdx.y * cuda.blockDim.y
@@ -85,12 +84,12 @@ def blur_shared(src, dst, filter):
 def blur_gpu(kernel, blockSize):
     gridSize = ((w + blockSize[0] - 1) // blockSize[0], (h + blockSize[1] - 1) // blockSize[1])
     devSrc = cuda.to_device(img)
-    devDst = cuda.to_device(img)  # start from a copy, so the border keeps the original pixels
+    devDst = cuda.to_device(img)
     devFilter = cuda.to_device(gaussian)
     kernel[gridSize, blockSize](devSrc, devDst, devFilter)
     return devDst.copy_to_host()
 
-# first run = compilation, not timed
+# first run (compilation)
 plt.imsave("blur_gpu.jpg", blur_gpu(blur, (16, 16)))
 plt.imsave("blur_gpu_shared.jpg", blur_gpu(blur_shared, (16, 16)))
 
