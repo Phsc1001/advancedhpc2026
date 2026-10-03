@@ -1,0 +1,114 @@
+\documentclass{report}
+
+\begin{document}
+\title{Labwork 7: Reduction}
+\author{Philippe Olivier Schriqui-Duque \\ ID: 2640042}
+\date{}
+\maketitle
+
+\section*{Introduction}
+
+In this labwork I implemented a grayscale stretch on the GPU. It is done in 3 steps: convert the image to gray (map), find the minimum and maximum intensity (reduce), and recalculate every pixel from $[min, max]$ to $[0, 255]$ (map). My 4K photo ($3840 \times 2880$) already used the full range, so I reduced its contrast first to see the effect: its gray values are between 57 and 181.
+
+\section*{Step 1: Grayscale (map)}
+
+This is my grayscale kernel from Labwork 4, but the output has only one channel of shape $(h, w)$, because only one gray value per pixel is needed for the next steps.
+
+\begin{verbatim}
+dst[y, x] = (int(src[y, x, 0]) +
+             int(src[y, x, 1]) +
+             int(src[y, x, 2])) // 3
+\end{verbatim}
+
+\section*{Step 2: Min and max (reduce)}
+
+The gray image is seen as a 1D array of $n = h \times w$ pixels. Each block of 256 threads copies its part of the image into shared memory, then reduces it by pairs until the first cell contains the minimum (and the maximum) of the block. After each step, \texttt{cuda.syncthreads()} waits for the whole block. Thread 0 writes the result of the block. Threads outside the image put a neutral value (255 for the min, 0 for the max).
+
+The kernel gives one result per block, so I copy these results back and finish with \texttt{min()} and \texttt{max()} on the CPU. It is only 21600 values, so it is very fast.
+
+\subsection*{Naive version}
+
+This is the version from the slides, where the stride $s$ goes up (1, 2, 4...):
+
+\begin{verbatim}
+s = 1
+while s < cuda.blockDim.x:
+    if localtid % (s * 2) == 0:
+        cache_min[localtid] = min(cache_min[localtid],
+                                  cache_min[localtid + s])
+        # same with max() for cache_max
+    cuda.syncthreads()
+    s = s * 2
+\end{verbatim}
+
+The condition \texttt{localtid \% (s * 2) == 0} causes branch divergence: inside a warp, some threads work and the others wait.
+
+\subsection*{Optimized version}
+
+I applied the optimizations from the slides:
+
+\begin{itemize}
+    \item The stride goes down ($s$ = 128, 64, ... 1) and only threads with \texttt{localtid < s} work. These threads are next to each other, so whole warps are either working or idle (no branch divergence), and thread $i$ reads cells $i$ and $i + s$ (no bank conflicts).
+    \item Each thread loads 2 pixels and already keeps the min and max of both before filling the cache. A block of 256 threads then handles 512 pixels, so I launch half as many blocks and no thread is idle in the first step.
+\end{itemize}
+
+\begin{verbatim}
+s = cuda.blockDim.x // 2
+while s > 0:
+    if localtid < s:
+        cache_min[localtid] = min(cache_min[localtid],
+                                  cache_min[localtid + s])
+        # same with max() for cache_max
+    cuda.syncthreads()
+    s = s // 2
+\end{verbatim}
+
+\section*{Step 3: Stretch (map)}
+
+Each pixel is recalculated with the formula from the slides:
+
+\[
+g' = \frac{g - min}{max - min} \times 255
+\]
+
+\begin{verbatim}
+dst[y, x] = (src[y, x] - mn) / (mx - mn) * 255
+\end{verbatim}
+
+The gray image stays on the GPU during the 3 steps, there is no copy in the middle.
+
+\section*{Results}
+
+The reduction finds a minimum of 57 and a maximum of 181, which is the same as \texttt{numpy}. After the stretch, the gray values go from 0 to 255 and the image has a much stronger contrast (see \texttt{gray.jpg} and \texttt{stretched.jpg}).
+
+To measure the effect of the optimizations, I ran both reductions 20 times on the same gray image already on the GPU:
+
+\begin{verbatim}
+reduction naive:     1.557 ms
+reduction optimized: 0.976 ms
+speedup: 1.60x
+\end{verbatim}
+
+The optimized reduction is 1.6 times faster, thanks to the removal of the branch divergence and the bank conflicts, and to the 2 pixels loaded by each thread.
+
+\section*{Block size vs time}
+
+The block size is used by the two map kernels (the reduction always uses 1D blocks of 256 threads). I ran the whole pipeline 20 times for each 2D block size:
+
+\begin{verbatim}
+8x8    10.37 +/- 0.77 ms
+16x8   10.62 +/- 1.40 ms
+16x16   9.73 +/- 1.05 ms
+32x8   11.82 +/- 6.08 ms
+16x32  12.03 +/- 1.18 ms
+32x16  12.83 +/- 1.75 ms
+32x32  11.96 +/- 1.38 ms
+\end{verbatim}
+
+16x16 is the fastest, but the differences stay small. Like in the previous labworks, most of the time is spent copying the image to the GPU and back, not in the kernels. The 32x8 result has a big standard deviation (6.08 ms), so it is affected by a few slow runs.
+
+\section*{Conclusion}
+
+The grayscale stretch combines the two patterns of the course: two maps and one reduction. The reduction is harder to write because the threads of a block have to work together with shared memory and synchronization. The optimizations from the slides made it 1.6 times faster, while the 2D block size has little effect on the whole program.
+
+\end{document}
